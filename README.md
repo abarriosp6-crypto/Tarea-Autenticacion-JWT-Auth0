@@ -1,188 +1,296 @@
-# demo-auth · Autenticación en aplicaciones web
+# Tarea 5 – Autenticación JWT, Refresh Tokens y Auth0
 
-Demo en vivo para la clase de Desarrollo Web sobre autenticación. Tiene dos partes que se ejecutan **por separado** (usan los mismos puertos):
+**Estudiante:** Anthony Jacob Barrios Pérez
+**Carné:** 0902-20-9735
+**Universidad:** Universidad Mariano Gálvez de Guatemala
+**Carrera:** Ingeniería en Sistemas
+**Curso:** Desarrollo Web
 
-| Parte | Qué muestra | Backend | Frontend |
-|---|---|---|---|
-| **A · 01-local** | Autenticación hecha por nosotros: registro, hash de contraseñas, JWT HS256, CORS, rate limiting y 2FA con TOTP | `Auth.Local.Api` (.NET 10, Minimal APIs, EF Core + SQLite) | `auth-local-web` (React + Vite + TS) |
-| **B · 02-auth0** | Autenticación delegada a un proveedor de identidad (Auth0): OIDC + PKCE, JWKS/RS256, permisos (RBAC), MFA y login social | `Auth.Auth0.Api` (.NET 10, Minimal APIs) | `auth0-web` (React + Vite + TS + `@auth0/auth0-react`) |
+## Descripción del proyecto
+
+Este proyecto corresponde a la práctica de autenticación y seguridad en aplicaciones web. Se trabajaron dos implementaciones: una autenticación local utilizando JWT y una autenticación mediante Auth0.
+
+Durante el desarrollo implementamos refresh tokens rotativos, rate limiting, verificación en dos pasos y control de acceso basado en roles (RBAC). También realizamos pruebas para comprobar que los endpoints protegidos respondieran correctamente según los permisos de cada usuario.
+
+## Tecnologías utilizadas
+
+- ASP.NET Core con .NET 10
+- React con TypeScript
+- Vite
+- Entity Framework Core
+- SQLite
+- Auth0
+- JWT (HS256 y RS256)
+- TOTP
+- Visual Studio Code y REST Client
+- Git y GitHub
+
+## Estructura del proyecto
 
 ```text
-demo-auth/
+Tarea-Autenticacion-JWT-Auth0/
 ├── 01-local/
-│   ├── Auth.Local.Api/        # API: register, login, profile, 2FA  (requests.http incluido)
-│   └── auth-local-web/        # React: Registro, Login, Perfil, Seguridad
+│   ├── Auth.Local.Api/
+│   └── auth-local-web/
 ├── 02-auth0/
-│   ├── Auth.Auth0.Api/        # API: public, private, private-scoped (requests.http incluido)
-│   └── auth0-web/             # React: login con Auth0, perfil, probar API
-├── README.md                  # este archivo
-└── GUION-DEMO.md              # guion paso a paso para el docente
+│   ├── Auth.Auth0.Api/
+│   └── auth0-web/
+├── .gitignore
+├── GUION-DEMO.md
+└── README.md
 ```
 
-**Puertos fijos:** APIs en `http://localhost:5080`, React en `http://localhost:5173`.
+Las dos partes se ejecutan por separado, ya que utilizan el mismo puerto para el frontend.
 
-## Requisitos
+## Parte 1. Autenticación local con JWT
 
-- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) (`dotnet --list-sdks` debe mostrar una 10.0.x)
-- [Node.js LTS](https://nodejs.org/) (22 o superior) y npm
-- Para probar las APIs: VS Code con la extensión **REST Client** (o Visual Studio / Rider, que abren `.http` de forma nativa)
-- Una app autenticadora en el celular (Google Authenticator, Microsoft Authenticator, Authy…) para el 2FA
-- Una cuenta gratuita de [Auth0](https://auth0.com/) para la Parte B
+En esta parte trabajamos con una API desarrollada en ASP.NET Core y una interfaz en React.
 
-## Parte A · Autenticación local
+### Funcionalidades implementadas
 
-### 1. Configurar la llave JWT (una sola vez)
+**1. Refresh tokens rotativos**
 
-La llave con la que se firman los JWT **no** está en el repositorio. Se guarda con `dotnet user-secrets` (fuera de la carpeta del proyecto, en el perfil del usuario):
+Implementamos refresh tokens generados de forma segura mediante `RandomNumberGenerator`. Los tokens se almacenan en SQLite utilizando un hash SHA-256, evitando guardar sus valores originales.
 
-```bash
+Los refresh tokens tienen una duración de siete días. Cuando se solicita una renovación válida, se revoca el token anterior y se genera uno nuevo junto con otro access token.
+
+También incorporamos una validación para detectar la reutilización de tokens revocados y proteger las sesiones activas.
+
+**2. Rate limiting**
+
+Configuramos límites de solicitudes utilizando las herramientas nativas de ASP.NET Core.
+
+Se permite un máximo de cinco intentos por minuto por dirección IP para los endpoints de inicio de sesión y verificación 2FA. Cuando se supera el límite, la API responde con HTTP 429.
+
+**3. Autenticación en dos pasos (TOTP)**
+
+Se utiliza una aplicación autenticadora para generar códigos temporales. El usuario puede configurar y activar la verificación en dos pasos desde la aplicación.
+
+**4. Renovación automática en React**
+
+El frontend identifica cuando un access token ha expirado y solicita uno nuevo mediante el refresh token. Después, vuelve a intentar la petición original una sola vez.
+
+**5. Cierre de sesión**
+
+Se implementó un endpoint para revocar el refresh token y finalizar la sesión.
+
+### Endpoints principales
+
+| Método | Endpoint | Descripción |
+|---|---|---|
+| POST | `/api/auth/register` | Registrar usuario |
+| POST | `/api/auth/login` | Iniciar sesión |
+| POST | `/api/auth/refresh` | Renovar tokens |
+| POST | `/api/auth/logout` | Cerrar sesión y revocar token |
+| POST | `/api/auth/2fa/setup` | Configurar TOTP |
+| POST | `/api/auth/2fa/enable` | Activar TOTP |
+| POST | `/api/auth/2fa/verify` | Verificar código TOTP |
+| GET | `/api/profile` | Consultar perfil protegido |
+
+### Ejecutar la Parte 1
+
+**Requisitos:** .NET 10 SDK, Node.js y npm.
+
+**Paso 1. Configurar la clave JWT**
+
+Abrir una terminal en:
+
+```powershell
 cd 01-local/Auth.Local.Api
-# Cualquier texto aleatorio de 32+ caracteres. Por ejemplo, con PowerShell:
-#   [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(48))
-dotnet user-secrets set "Jwt:Key" "PEGA_AQUI_UNA_LLAVE_ALEATORIA_DE_AL_MENOS_32_CARACTERES"
-dotnet user-secrets list
 ```
 
-Si falta la llave, la API **no arranca** y muestra: `Jwt:Key debe tener al menos 32 caracteres...`.
+Generar una clave segura y guardarla mediante User Secrets:
 
-### 2. Ejecutar la API
+```powershell
+$key = [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(48))
+dotnet user-secrets set "Jwt:Key" "$key"
+```
 
-```bash
-cd 01-local/Auth.Local.Api
+La clave no se publica en GitHub.
+
+**Paso 2. Ejecutar la API**
+
+```powershell
+dotnet restore
 dotnet run
 ```
 
-- Crea `auth.db` (SQLite) automáticamente la primera vez. Para empezar de cero: detén la API y borra `auth.db`.
-- Prueba los endpoints con [01-local/Auth.Local.Api/requests.http](01-local/Auth.Local.Api/requests.http).
-- Para ver la expiración del token rápido: `dotnet run -- --Jwt:AccessTokenMinutes=1`.
+La API local utiliza:
 
-| Método | Ruta | Auth | Respuestas |
-|---|---|---|---|
-| GET | `/api/health` | anónimo | 200 |
-| POST | `/api/auth/register` | anónimo | 201, 400, 409 |
-| POST | `/api/auth/login` | anónimo (5/min por IP) | 200 `{ accessToken }` o `{ requires2fa, tempToken }`, 401, 429 |
-| GET | `/api/profile` | Bearer | 200, 401, 403 (tempToken) |
-| POST | `/api/auth/2fa/setup` | Bearer | 200 `{ secret, otpauthUri }`, 409 |
-| POST | `/api/auth/2fa/enable` | Bearer | 200, 400 |
-| POST | `/api/auth/2fa/verify` | anónimo (5/min por IP) | 200 `{ accessToken }`, 401, 429 |
+`http://localhost:5080`
 
-### 3. Ejecutar el frontend
+La base de datos SQLite se crea localmente.
 
-```bash
+**Paso 3. Ejecutar React**
+
+Abrir otra terminal:
+
+```powershell
 cd 01-local/auth-local-web
-cp .env.example .env        # en PowerShell: Copy-Item .env.example .env
+Copy-Item .env.example .env
 npm install
-npm run dev                 # http://localhost:5173
+npm run dev
 ```
 
-`.env` solo contiene `VITE_API_URL=http://localhost:5080`.
+El frontend estará disponible en:
 
-## Parte B · Auth0
+`http://localhost:5173`
 
-> Detén la Parte A antes (mismos puertos). Primero completa la [Configuración de Auth0](#configuración-de-auth0).
+La variable `VITE_API_URL` debe apuntar a `http://localhost:5080`.
 
-### 1. Ejecutar la API
+## Parte 2. Autenticación con Auth0 y RBAC
 
-```bash
+En esta parte utilizamos Auth0 como proveedor de identidad para administrar el inicio de sesión y los permisos de acceso.
+
+### Funcionalidades implementadas
+
+**1. Autenticación mediante Auth0**
+
+Integramos una aplicación React con Auth0 utilizando OpenID Connect y el flujo Authorization Code con PKCE.
+
+La API valida los access tokens emitidos por Auth0 mediante JWT Bearer y firmas RS256.
+
+**2. Roles y permisos**
+
+Configuramos dos roles:
+
+| Rol | Permisos |
+|---|---|
+| Lector | `read:messages` |
+| Administrador | `read:messages`, `delete:messages` |
+
+**3. Gestión de mensajes**
+
+Implementamos una lista de mensajes almacenada en memoria. Los usuarios autorizados pueden consultar los mensajes, mientras que únicamente los administradores pueden eliminarlos.
+
+**4. Protección de endpoints**
+
+La API valida los permisos incluidos en el access token.
+
+El frontend también oculta los botones de eliminación a los usuarios que no cuentan con el permiso correspondiente. Sin embargo, la seguridad se aplica principalmente desde el backend.
+
+### Endpoints principales
+
+| Método | Endpoint | Permiso requerido |
+|---|---|---|
+| GET | `/api/health` | Público |
+| GET | `/api/public` | Público |
+| GET | `/api/private` | Usuario autenticado |
+| GET | `/api/private-scoped` | `read:messages` |
+| GET | `/api/messages` | `read:messages` |
+| DELETE | `/api/messages/{id}` | `delete:messages` |
+
+### Pruebas realizadas
+
+| Prueba | Resultado |
+|---|---|
+| Lector consulta mensajes | HTTP 200 |
+| Administrador consulta mensajes | HTTP 200 |
+| Administrador elimina un mensaje | HTTP 204 |
+| Lector intenta eliminar un mensaje mediante DELETE | HTTP 403 |
+
+Estas pruebas demostraron que las restricciones se aplican correctamente en la API.
+
+### Configuración de Auth0
+
+Para ejecutar esta parte se necesita crear una aplicación SPA y una API en Auth0.
+
+**Configuración de la API:**
+
+- Identificador (Audience): `https://api.umg-messages.com`
+- Algoritmo: RS256
+- Enable RBAC: activado
+- Add Permissions in the Access Token: activado
+- Permisos: `read:messages` y `delete:messages`
+
+**Configuración de la aplicación SPA:**
+
+- Allowed Callback URLs: `http://localhost:5173`
+- Allowed Logout URLs: `http://localhost:5173`
+- Allowed Web Origins: `http://localhost:5173`
+
+También se deben crear los roles Lector y Administrador, asignarles sus permisos y asociarlos a usuarios de prueba.
+
+### Ejecutar la Parte 2
+
+Antes de iniciar, detener la API y el frontend de la Parte 1.
+
+**Paso 1. Configurar la API de Auth0**
+
+```powershell
 cd 02-auth0/Auth.Auth0.Api
-dotnet user-secrets set "Auth0:Domain" "tu-tenant.us.auth0.com"
+dotnet user-secrets set "Auth0:Domain" "TU-DOMINIO.auth0.com"
+dotnet user-secrets set "Auth0:Audience" "https://api.umg-messages.com"
+dotnet restore
 dotnet run
 ```
 
-`Auth0:Audience` ya está en `appsettings.json` (`https://api.demo-auth.local`). Aquí **no hay llave secreta**: la API valida las firmas RS256 con las llaves públicas que Auth0 publica en `https://tu-tenant.us.auth0.com/.well-known/jwks.json`.
+La API de Auth0 utiliza:
 
-| Método | Ruta | Auth | Respuestas |
-|---|---|---|---|
-| GET | `/api/public` | anónimo | 200 |
-| GET | `/api/private` | Bearer de Auth0 | 200, 401 |
-| GET | `/api/private-scoped` | Bearer + permiso `read:messages` | 200, 401, 403 |
+`http://localhost:5090`
 
-Prueba con [02-auth0/Auth.Auth0.Api/requests.http](02-auth0/Auth.Auth0.Api/requests.http) (el token se copia desde el frontend).
+**Paso 2. Configurar el frontend**
 
-### 2. Ejecutar el frontend
+Abrir otra terminal:
 
-```bash
+```powershell
 cd 02-auth0/auth0-web
-cp .env.example .env        # y edita los valores
+Copy-Item .env.example .env
 npm install
-npm run dev                 # http://localhost:5173
 ```
 
-| Variable | Dónde se obtiene |
-|---|---|
-| `VITE_AUTH0_DOMAIN` | Applications → *tu SPA* → Settings → **Domain** |
-| `VITE_AUTH0_CLIENT_ID` | Applications → *tu SPA* → Settings → **Client ID** |
-| `VITE_AUTH0_AUDIENCE` | Applications → APIs → *tu API* → **Identifier** (`https://api.demo-auth.local`) |
-| `VITE_API_URL` | `http://localhost:5080` |
+Editar el archivo `.env` con los valores de la aplicación Auth0:
 
-Ninguno de estos valores es secreto (una SPA no puede guardar secretos; por eso usa Authorization Code + PKCE sin *client secret*). Aun así el `.env` no se versiona porque depende de cada tenant.
-
-## Configuración de Auth0
-
-Checklist manual en el [dashboard de Auth0](https://manage.auth0.com/):
-
-- [ ] **Crear un tenant** (por ejemplo `demo-auth-umg`, región US). Anota el dominio: `demo-auth-umg.us.auth0.com`.
-- [ ] **Application tipo SPA**: *Applications → Applications → Create Application → Single Page Web Applications* (nombre: `Demo Auth Web`). En *Settings*:
-  - Allowed Callback URLs: `http://localhost:5173`
-  - Allowed Logout URLs: `http://localhost:5173`
-  - Allowed Web Origins: `http://localhost:5173`
-  - Guarda los cambios (*Save Changes*) y copia **Domain** y **Client ID** al `.env`.
-- [ ] **API**: *Applications → APIs → Create API*
-  - Name: `Demo Auth API`
-  - Identifier: `https://api.demo-auth.local` (es solo un identificador; no tiene que existir esa URL)
-  - Signing Algorithm: `RS256`
-- [ ] En la API → pestaña *Settings* → **RBAC Settings**: activar **Enable RBAC** y **Add Permissions in the Access Token**. Guardar.
-- [ ] En la API → pestaña *Permissions*: crear el permiso **`read:messages`** (descripción: “Leer mensajes”).
-- [ ] Si tu tenant muestra la pestaña *Application Access* en la API, verifica que la SPA `Demo Auth Web` tenga permitido el acceso **de usuario** a la API.
-- [ ] **Rol**: *User Management → Roles → Create Role* (`Lector`) → pestaña *Permissions* → *Add Permissions* → `Demo Auth API` → `read:messages`.
-- [ ] **Usuarios**: *User Management → Users → Create User* (conexión `Username-Password-Authentication`).
-  - Usuario **con** rol: pestaña *Roles* → *Assign Roles* → `Lector`.
-  - Crea un **segundo usuario sin rol** para mostrar el 403.
-- [ ] **MFA con One-time Password**: *Security → Multi-factor Auth* → activar **One-time Password** → en *Define policies* elegir **Always** (o *Adaptive* si prefieres). Guardar. El primer login pedirá enrolar la app autenticadora con un QR (lo mismo que hicimos a mano en la Parte A).
-- [ ] **Login social con Google**: *Authentication → Social → Google / Gmail* (conexión `google-oauth2`) activada, y en *Applications → Demo Auth Web → Connections* habilitar `google-oauth2`. Las “dev keys” de Auth0 sirven para la demo (muestran una advertencia); en producción se usan credenciales propias de Google Cloud.
-
-> Al iniciar sesión desde `localhost`, Auth0 muestra una pantalla de **consentimiento** (“Demo Auth Web quiere acceder a…”) la primera vez. Es normal: en `localhost` Auth0 no permite omitirla.
-
-## Etiquetas (tags) para la clase
-
-Cada paso es un commit con su tag. Durante la clase se puede saltar a cualquier punto:
-
-```bash
-git checkout parteA-paso05     # el repositorio queda en ese paso (HEAD separado)
-git switch -                   # volver a la rama
+```env
+VITE_AUTH0_DOMAIN=TU-DOMINIO.auth0.com
+VITE_AUTH0_CLIENT_ID=TU_CLIENT_ID
+VITE_AUTH0_AUDIENCE=https://api.umg-messages.com
+VITE_API_URL=http://localhost:5090
 ```
 
-| Tag | Contenido |
-|---|---|
-| `parteA-paso01` | API base, EF Core + SQLite, entidad `User`, `/api/health` |
-| `parteA-paso02` | `POST /api/auth/register` con validación y `PasswordHasher` |
-| `parteA-paso03` | `TokenService` (JWT HS256) y `JwtOptions` |
-| `parteA-paso04` | `POST /api/auth/login` con 401 genérico |
-| `parteA-paso05` | Validación JWT Bearer y `GET /api/profile` |
-| `parteA-paso06` | Política CORS `web` |
-| `parteA-paso07` | Rate limiting en el login (429) |
-| `parteA-paso08` | 2FA con TOTP (setup, enable, verify, tempToken) |
-| `parteA-paso09` | React: `AuthContext` en memoria y `apiFetch` |
-| `parteA-paso10` | Páginas Registro, Login, Perfil y panel “Token actual” |
-| `parteA-paso11` | Página Seguridad (QR) y login en dos pasos |
-| `parteB-paso01` | API Auth0 base con CORS |
-| `parteB-paso02` | JWT Bearer con Authority/Audience de Auth0 |
-| `parteB-paso03` | `/api/public`, `/api/private`, `/api/private-scoped` |
-| `parteB-paso04` | React con `Auth0Provider` |
-| `parteB-paso05` | Barra de sesión y tarjeta de perfil |
-| `parteB-paso06` | Panel “Probar API” y payload del access token |
+Después ejecutar:
 
-El guion detallado está en [GUION-DEMO.md](GUION-DEMO.md).
+```powershell
+npm run dev
+```
 
-## Problemas frecuentes
+Abrir:
 
-| Síntoma | Causa / solución |
-|---|---|
-| La API no arranca: `Jwt:Key debe tener al menos 32 caracteres` | Falta `dotnet user-secrets set "Jwt:Key" ...` en `Auth.Local.Api`. |
-| La API Auth0 no arranca: `Falta configurar Auth0` | Falta `dotnet user-secrets set "Auth0:Domain" ...` en `Auth.Auth0.Api`. |
-| `Address already in use` / `Port 5173 is in use` | Hay otra parte corriendo. Detén la API (Ctrl+C) y el `npm run dev` anteriores. |
-| Error CORS en la consola del navegador | El frontend no corre en `http://localhost:5173` exacto (no `127.0.0.1`). |
-| El código 2FA siempre es inválido | La hora del celular o del PC está desfasada. Activa la hora automática. |
-| Auth0: `Callback URL mismatch` | Revisa *Allowed Callback URLs* = `http://localhost:5173` (sin `/` final). |
-| Auth0: `Service not found: https://api.demo-auth.local` | La API no existe en Auth0 o el Identifier no coincide con `VITE_AUTH0_AUDIENCE`. |
-| `/api/private-scoped` da 403 a un usuario con rol | Falta *Add Permissions in the Access Token*, o el usuario debe cerrar sesión y volver a entrar para recibir un token nuevo. |
+`http://localhost:5173`
+
+## Parte 3. Investigación: passkeys frente a TOTP
+
+Como complemento de la práctica, realizamos una investigación sobre passkeys (WebAuthn/FIDO2) y TOTP.
+
+Se analizaron sus mecanismos de registro y autenticación, resistencia al phishing, experiencia de usuario, recuperación de cuentas y aplicación en un sistema universitario de notas.
+
+Esta investigación se encuentra desarrollada en el informe PDF de la tarea.
+
+## Seguridad del repositorio
+
+Para evitar exponer información privada, se excluyeron del repositorio:
+
+- Archivos `.env` con configuraciones locales.
+- Claves JWT y secretos privados.
+- Bases de datos SQLite locales.
+- Carpetas `node_modules`, `bin`, `obj` y `dist`.
+- Tokens reales utilizados durante las pruebas.
+
+Las claves JWT se configuran mediante `dotnet user-secrets` y las variables del frontend mediante archivos `.env` locales.
+
+## Resultados y aprendizajes
+
+Durante esta práctica aprendí a implementar mecanismos de autenticación más seguros y a controlar los permisos de los usuarios desde el backend.
+
+Las pruebas de refresh tokens, rate limiting y Auth0 permitieron comprobar cómo responde una aplicación ante tokens vencidos, intentos repetidos de acceso y operaciones sin autorización.
+
+También comprendí que ocultar opciones en el frontend no sustituye las validaciones de seguridad en la API.
+
+## Repositorio
+
+Proyecto desarrollado como parte de la Tarea 5 de autenticación en aplicaciones web.
+
+**Estudiante:** Anthony Jacob Barrios Pérez
+**Carné:** 0902-20-9735
+
+**GitHub:** https://github.com/abarriosp6-crypto/Tarea-Autenticacion-JWT-Auth0
